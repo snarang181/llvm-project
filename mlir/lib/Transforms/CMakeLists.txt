@@ -1,6 +1,7 @@
 add_subdirectory(Utils)
 
 add_mlir_library(MLIRTransforms
+  AffineCostModel.cpp
   Canonicalizer.cpp
   CompositePass.cpp
   ControlFlowSink.cpp

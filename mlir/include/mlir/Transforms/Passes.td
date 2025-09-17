@@ -402,6 +402,11 @@ def PrintOpStats : Pass<"print-op-stats"> {
   ];
 }
 
+def AffineCostModel : Pass<"affine-cost-model"> {
+  let summary = "Compute cost metrics for affine loop nests";
+  let constructor = "mlir::createAffineCostModelPass()";
+}
+
 def SCCP : Pass<"sccp"> {
   let summary = "Sparse Conditional Constant Propagation";
   let description = [{
