@@ -499,3 +499,37 @@ module attributes {transform.with_named_sequence} {
       transform.yield
   }
 }
+
+// -----
+
+func.func @generic_split_index(%in: tensor<8xi32>, %out: tensor<i32>) -> tensor<i32> {
+  %r = linalg.generic {indexing_maps = [affine_map<(k) -> (k)>, affine_map<(k) -> ()>],
+                       iterator_types = ["reduction"]}
+    ins(%in : tensor<8xi32>) outs(%out : tensor<i32>) {
+  ^bb0(%a: i32, %acc: i32):
+    %k = linalg.index 0 : index
+    %c = arith.index_cast %k : index to i32
+    %s = arith.addi %acc, %c : i32
+    linalg.yield %s : i32
+  } -> tensor<i32>
+  return %r : tensor<i32>
+}
+
+//  The reduction dimension k is strip-mined into (p, r) with k = p * 2 + r, so
+//  the `linalg.index 0` moved into the new domain must be rebuilt from both.
+//  CHECK-DAG: #[[$REMAP:.*]] = affine_map<()[s0, s1] -> (s0 * 2 + s1)>
+// CHECK-LABEL:  func @generic_split_index
+//      CHECK: linalg.generic {{.*}} iterator_types = ["parallel", "reduction"]
+//      CHECK:   %[[P:.*]] = linalg.index 0 : index
+//      CHECK:   %[[R:.*]] = linalg.index 1 : index
+//      CHECK:   %[[K:.*]] = affine.apply #[[$REMAP]]()[%[[P]], %[[R]]]
+//      CHECK:   arith.index_cast %[[K]]
+
+module attributes {transform.with_named_sequence} {
+  transform.named_sequence @__transform_main(%arg1: !transform.any_op {transform.readonly}) {
+    %0 = transform.structured.match ops{["linalg.generic"]} in %arg1 : (!transform.any_op) -> !transform.any_op
+    %1:4 = transform.structured.split_reduction %0 { split_factor = 4, insert_split_dimension = 0 }
+      : (!transform.any_op) -> (!transform.any_op, !transform.any_op, !transform.any_op, !transform.any_op)
+      transform.yield
+  }
+}

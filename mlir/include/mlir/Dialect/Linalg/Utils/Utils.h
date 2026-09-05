@@ -243,6 +243,20 @@ void offsetIndices(OpBuilder &b, LinalgOp linalgOp,
 void offsetIndices(RewriterBase &b, LinalgOp linalgOp,
                    ArrayRef<OpFoldResult> offests);
 
+/// Rewrite the `linalg.index` ops contained in `linalgOp` after its iteration
+/// domain has been replaced by a new one.
+///
+/// `oldDimsToNewExprs` maps each position of the *old* iteration domain, given
+/// as a result, to an expression over the dimensions of the *new* domain. For
+/// example, strip-mining old dimension 0 into new dimensions `(outer, inner)`
+/// with tile size 4 is expressed as `(d0, d1) -> (d0 * 4 + d1)`.
+///
+/// Unlike `offsetIndices`, which only shifts indices within a domain of
+/// unchanged rank, this handles domains whose rank or dimension order changed.
+/// Results beyond the number of old dimensions are ignored.
+void remapIndices(RewriterBase &b, LinalgOp linalgOp,
+                  AffineMap oldDimsToNewExprs);
+
 /// A struct containing the Linalg producer before and after fusion.
 /// When operating on tensors, `fusedProducer` may feed into a `tensor.cast`
 /// op before the consumer Linalg op, until enough canonicalizations have

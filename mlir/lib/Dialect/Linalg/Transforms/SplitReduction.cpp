@@ -174,6 +174,37 @@ FailureOr<SplitReductionResult> mlir::linalg::splitReduction(
   b.inlineRegionBefore(op->getRegion(0), genericOp.getRegion(),
                        genericOp.getRegion().begin());
 
+  // The region was written against the original iteration domain, so any
+  // `linalg.index` in it still refers to the old dimension positions. Rebuild
+  // each old coordinate from the new domain: every dimension is shifted by the
+  // inserted split dimension, and the reduction dimension itself is now the
+  // pair (parallel, reduction) that it was strip-mined into.
+  {
+    unsigned numOldDims = op.getNumLoops();
+    AffineExpr parallelDim = b.getAffineDimExpr(insertSplitDimension);
+    auto shifted = [&](unsigned d) {
+      return b.getAffineDimExpr(d < insertSplitDimension ? d : d + 1);
+    };
+    SmallVector<AffineExpr> oldToNew;
+    oldToNew.reserve(numOldDims);
+    for (unsigned d = 0; d < numOldDims; ++d) {
+      if (d != reductionDim) {
+        oldToNew.push_back(shifted(d));
+        continue;
+      }
+      // Without `innerParallel` the parallel dimension is outermost and each
+      // of its steps covers `reductionDimSize / ratio` source elements; with
+      // it, the reduction dimension is outermost and covers `ratio` each.
+      AffineExpr reductionExpr = shifted(reductionDim);
+      oldToNew.push_back(control.innerParallel
+                             ? reductionExpr * ratio + parallelDim
+                             : parallelDim * (reductionDimSize / ratio) +
+                                   reductionExpr);
+    }
+    remapIndices(b, genericOp,
+                 AffineMap::get(numOldDims + 1, 0, oldToNew, op.getContext()));
+  }
+
   // Then create a new reduction that only reduce the newly added dimension
   // from the previous op.
   unsigned intermRank = newOutputShape.size();

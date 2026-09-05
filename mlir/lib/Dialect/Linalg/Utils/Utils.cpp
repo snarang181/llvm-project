@@ -2898,6 +2898,47 @@ void offsetIndices(RewriterBase &b, LinalgOp linalgOp,
   }
 }
 
+void remapIndices(RewriterBase &b, LinalgOp linalgOp,
+                  AffineMap oldDimsToNewExprs) {
+  if (!linalgOp.hasIndexSemantics())
+    return;
+
+  Block *body = linalgOp.getBlock();
+  // Collect the existing ops first: the replacements below introduce new
+  // `linalg.index` ops for the new domain, which must not be rewritten again.
+  SmallVector<IndexOp> oldIndexOps(body->getOps<IndexOp>());
+  if (oldIndexOps.empty())
+    return;
+
+  OpBuilder::InsertionGuard guard(b);
+  Location loc = linalgOp.getLoc();
+
+  // Materialize one `linalg.index` per dimension of the new domain; the
+  // replacement expressions are written over these. Any that end up unused are
+  // erased below rather than left as dead ops.
+  b.setInsertionPointToStart(body);
+  SmallVector<Value> newDims;
+  newDims.reserve(oldDimsToNewExprs.getNumDims());
+  for (unsigned i = 0, e = oldDimsToNewExprs.getNumDims(); i < e; ++i)
+    newDims.push_back(IndexOp::create(b, loc, i).getResult());
+  SmallVector<OpFoldResult> newDimsAsOfr = getAsOpFoldResult(newDims);
+
+  for (IndexOp indexOp : oldIndexOps) {
+    unsigned dim = indexOp.getDim();
+    if (dim >= oldDimsToNewExprs.getNumResults())
+      continue;
+    b.setInsertionPoint(indexOp);
+    OpFoldResult applied = makeComposedFoldedAffineApply(
+        b, indexOp.getLoc(), oldDimsToNewExprs.getResult(dim), newDimsAsOfr);
+    b.replaceOp(indexOp,
+                getValueOrCreateConstantIndexOp(b, indexOp.getLoc(), applied));
+  }
+
+  for (Value dim : newDims)
+    if (dim.use_empty())
+      b.eraseOp(dim.getDefiningOp());
+}
+
 /// Get the reassociation maps to fold the result of a extract_slice (or source
 /// of a insert_slice) operation with given offsets, and sizes to its
 /// rank-reduced version. This is only done for the cases where the size is 1
